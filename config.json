@@ -1,0 +1,20 @@
+{
+	"EmailConfig" : {
+		"SmtpServer" : "mail.open-spirit.net:25",
+		"Subject" : "Authorization key",
+		"Message" : "Your authorization key:",
+		"Sender" : "support@open-spirit.net"
+	},
+	"ReporterUser" : "reporter",
+	"ReporterPassword" : "supertajneheslo",
+	"AuthSelect" : "select email, password from volunteers",
+	"RealmPrefix" : "Basic realm=",
+	"AuthorizationRequired" : "Authorization Required",
+	"WwwAuthentificate" : "WWW-Authenticate",
+	"ErrorNotFound" : "Not found",
+	"ErrorUnauthorized" : "Unauthorized",
+	"JsonDecoding" : "Json decoding: ",
+	"EntityExists" : "Entity already exists",
+	"InternalError" : "Internal error",
+	"VolunteerEmailSelect" : "select team_id,volunteer_email from volunteer_emails as ve,teams as t where ve.team_id=t.id and ve.volunteer_email=? and t.identifier=?"
+}
