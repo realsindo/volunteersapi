@@ -1,67 +1,27 @@
 package main
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 	"github.com/sethvargo/go-password/password"
 )
-
-//Used constatnts
-const errorNotFound = "ErrorNotFound"
-const errorUnauthorized = "ErrorUnauthorized"
-const jsonDecoding = "JsonDecoding"
-const entityExists = "EntityExists"
-const errorInternal = "InternalError"
-const reporterUser = "ReporterUser"
-const reporterPassword = "ReporterPassword"
-
-//authentificate user if data contain user data
-func volunteerAuth(c *gin.Context, vol *Volunteer) bool {
-	email, _, _ := c.Request.BasicAuth()
-	if email != vol.Email {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error":  conf[errorUnauthorized].(string),
-			"status": http.StatusUnauthorized,
-		})
-		return false
-	}
-	return true
-}
-
-//this is preparation for reporter user which will be able to get all data
-func reporterAuth(c *gin.Context) bool {
-	repuser, passwd, _ := c.Request.BasicAuth()
-
-	if repuser != conf[reporterUser].(string) || passwd != conf[reporterPassword].(string) {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error":  conf[errorUnauthorized].(string),
-			"status": http.StatusUnauthorized,
-		})
-		return false
-	}
-	return true
-}
 
 //deleteVolunteer for authentificated user and his data
 func deleteVolunteer(c *gin.Context) {
 	email := c.Params.ByName("email")
 	var vol Volunteer
 	if err := db.Where("email = ?", email).Find(&vol).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":  conf[errorNotFound].(string),
-			"status": http.StatusNotFound,
-		})
+		createNotFoundResponse(c)
 		return
 	}
-	//User check
+
+	//Checks if data belongs to the user
 	if !volunteerAuth(c, &vol) {
 		return
 	}
-	//db delete
+	//Deletes from database
 	db.Delete(&vol)
 
-	//delete from authentification map
+	//Deletes from authentification map
 	delete(authMap, vol.Email)
 	c.JSON(200, gin.H{"Message": email + " deleted"})
 }
@@ -72,40 +32,33 @@ func updateVolunteer(c *gin.Context) {
 	var vol Volunteer
 	email := c.Params.ByName("email")
 
-	//check json data
-	if err = c.BindJSON(&vol); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":  conf[jsonDecoding].(string) + err.Error(),
-			"status": http.StatusBadRequest,
-		})
+	//Checks json data
+	if err := c.BindJSON(&vol); err != nil {
+		createBadRequestResponse(c, err)
 		return
 	}
 
-	//get volunteer from database
+	//Gets volunteer from database
 	var oldvol Volunteer
 	if err := db.Where("email = ?", email).First(&oldvol).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":  conf[errorNotFound].(string),
-			"status": http.StatusNotFound,
-		})
+		createNotFoundResponse(c)
 		return
 	}
-	//sets data which could not be changed (I am still not sure if path have to be with :email )
+	//Sets data which could not be changed (I am still not sure if url path have to be with :email )
 	vol.ID = oldvol.ID
 	vol.Email = oldvol.Email
 	if vol.Password == "" {
 		vol.Password = oldvol.Password
 	}
+
+	//Checks if data belongs to the user
 	if !volunteerAuth(c, &vol) {
 		return
 	}
 
-	//Save to db
+	//Saves Volunteer to the database
 	if err := db.Save(&vol).Error; err != nil {
-		c.JSON(http.StatusConflict, gin.H{
-			"error":  conf[entityExists].(string),
-			"status": http.StatusConflict,
-		})
+		createStatusConflictResponse(c)
 		return
 	}
 	//change password in auth map
@@ -114,34 +67,28 @@ func updateVolunteer(c *gin.Context) {
 
 }
 
-//creates new Volunteer
+//Creates new Volunteer
 func createVolunteer(c *gin.Context) {
 
 	var vol Volunteer
-	//check json data
-	if err = c.BindJSON(&vol); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":  conf[jsonDecoding].(string) + err.Error(),
-			"status": http.StatusBadRequest,
-		})
+	//Checks json data
+	if err := c.BindJSON(&vol); err != nil {
+		createBadRequestResponse(c, err)
 		return
 	}
 
-	//generate password
+	//Generates password
 	res, _ := password.Generate(16, 5, 3, false, true)
 	vol.Password = res
-	//writes to database
+	//Writes user to the database
 	if err := db.Create(&vol).Error; err != nil {
-		c.JSON(http.StatusConflict, gin.H{
-			"error":  conf[entityExists].(string),
-			"status": http.StatusConflict,
-		})
+		createStatusConflictResponse(c)
 		return
 	}
-	//add to auth map
+	//Add user credential to auth map
 	authMap[vol.Email] = res
 
-	//send email with password
+	//Sends email with password
 	vol.sendEmailWithPassword()
 	c.JSON(200, gin.H{"Message": vol.Email + " created"})
 }
@@ -151,34 +98,29 @@ func createVolunteer(c *gin.Context) {
 func getVolunteer(c *gin.Context) {
 	email := c.Params.ByName("email")
 	var vol Volunteer
-	//read volunteer from database
+	//Reads Volunteer from database
 	if err := db.Where("email = ?", email).First(&vol).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":  conf[errorNotFound].(string),
-			"status": http.StatusNotFound,
-		})
+		createNotFoundResponse(c)
 		return
 	}
-	//check user
+	//Checks if data belongs to the user
 	if !volunteerAuth(c, &vol) {
 		return
 	}
-	//set volunteer json
+	//Sets volunteer json
 	c.JSON(200, vol)
 }
 
 //getVolunteers only for reporter
 func getVolunteers(c *gin.Context) {
 	var vols []Volunteer
-	//read volunteers from database
+	//Read volunteers from database
 	if err := db.Find(&vols).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":  conf[errorNotFound].(string),
-			"status": http.StatusNotFound,
-		})
+		createNotFoundResponse(c)
 		return
 	}
 
+	//Authorization if user is reporter
 	if !reporterAuth(c) {
 		return
 	}

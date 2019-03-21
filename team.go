@@ -1,32 +1,24 @@
 package main
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 )
 
-//Used constant
-const selectVolunteerEmail = "VolunteerEmailSelect"
+//Used constants
+const cSelectVolunteerEmail = "VolunteerEmailSelect"
 
 //createTeam for authentificated user
 func createTeam(c *gin.Context) {
 	var tm Team
-	//json validation
-	if err = c.BindJSON(&tm); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":  conf[jsonDecoding].(string) + err.Error(),
-			"status": http.StatusBadRequest,
-		})
+	//Validates json
+	if err := c.BindJSON(&tm); err != nil {
+		createBadRequestResponse(c, err)
 		return
 	}
 
-	//db creation
+	//Creates Team in database
 	if err := db.Create(&tm).Error; err != nil {
-		c.JSON(http.StatusConflict, gin.H{
-			"error":  conf[entityExists].(string),
-			"status": http.StatusConflict,
-		})
+		createStatusConflictResponse(c)
 		return
 	}
 	c.JSON(200, tm)
@@ -35,15 +27,12 @@ func createTeam(c *gin.Context) {
 //getTeams only for reporter
 func getTeams(c *gin.Context) {
 	var tms []Team
-	//read from db
+	//Reads from database
 	if err := db.Preload("VolunteerEmails").Find(&tms).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":  conf[errorNotFound].(string),
-			"status": http.StatusNotFound,
-		})
+		createNotFoundResponse(c)
 		return
 	}
-	//repoter check
+	//Checks if user is reporter
 	if !reporterAuth(c) {
 		return
 	}
@@ -55,72 +44,55 @@ func getTeam(c *gin.Context) {
 	id := c.Params.ByName("identifier")
 	var tm Team
 	if err := db.Where("identifier = ?", id).Preload("VolunteerEmails").First(&tm).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":  conf[errorNotFound].(string),
-			"status": http.StatusNotFound,
-		})
+		createNotFoundResponse(c)
 		return
 	}
 	c.JSON(200, tm)
 
 }
 
+//deleteTeam only for authentificated user
 func deleteTeam(c *gin.Context) {
 	identifier := c.Params.ByName("identifier")
 	var tm Team
 	if err := db.Where("identifier = ?", identifier).Find(&tm).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":  conf[errorNotFound].(string),
-			"status": http.StatusNotFound,
-		})
+		createNotFoundResponse(c)
 		return
 	}
 	db.Delete(&tm)
 	c.JSON(200, gin.H{"Message": identifier + " deleted"})
 }
 
-//assign Volunteer to team
+//Assigns Volunteer to the Team
 func assignVolunteerToTeam(c *gin.Context) {
 	identifier := c.Params.ByName("identifier")
 
 	var ve VolunteerEmail
-	//validate json
-	if err = c.BindJSON(&ve); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":  conf[jsonDecoding].(string) + err.Error(),
-			"status": http.StatusBadRequest,
-		})
+	//Validates json
+	if err := c.BindJSON(&ve); err != nil {
+		createBadRequestResponse(c, err)
 		return
 	}
 	email := ve.VolunteerEmail
 
-	//get VolunteerEmail from database
-	err := db.Raw(conf[selectVolunteerEmail].(string), ve.VolunteerEmail, identifier).Find(&ve).Error
+	//Gets VolunteerEmail from database
+	err := db.Raw(getCfgString(cSelectVolunteerEmail), ve.VolunteerEmail, identifier).Find(&ve).Error
 	if err == nil {
-		c.JSON(http.StatusConflict, gin.H{
-			"error":  conf[entityExists].(string),
-			"status": http.StatusConflict,
-		})
+		createStatusConflictResponse(c)
 		return
 	}
 
-	//get Team from database
+	//Gets Team from database
 	var tm Team
 	if err := db.Where("identifier = ?", identifier).First(&tm).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":  conf[errorInternal].(string),
-			"status": http.StatusInternalServerError,
-		})
+		createInternalErrorResponse(c)
 		return
 	}
 
-	//write to database
+	//Writes VolunterEmail to the database
 	ve = VolunteerEmail{tm.ID, email}
 	if err := db.Create(&ve).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":  conf[errorInternal].(string),
-			"status": http.StatusInternalServerError,
-		})
+		createInternalErrorResponse(c)
 		return
 	}
 	c.JSON(200, ve)
@@ -132,43 +104,31 @@ func deassignVolunteerFromTeam(c *gin.Context) {
 	identifier := c.Params.ByName("identifier")
 
 	var ve VolunteerEmail
-	//validate json
-	if err = c.BindJSON(&ve); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":  conf[jsonDecoding].(string) + err.Error(),
-			"status": http.StatusBadRequest,
-		})
+	//Validates json
+	if err := c.BindJSON(&ve); err != nil {
+		createBadRequestResponse(c, err)
 		return
 	}
 	email := ve.VolunteerEmail
 
-	//get VolunteerEmail from database
-	err := db.Raw(conf[selectVolunteerEmail].(string), ve.VolunteerEmail, identifier).Find(&ve).Error
+	//Gets VolunteerEmail from database
+	err := db.Raw(getCfgString(cSelectVolunteerEmail), ve.VolunteerEmail, identifier).Find(&ve).Error
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":  conf[errorNotFound].(string),
-			"status": http.StatusNotFound,
-		})
+		createNotFoundResponse(c)
 		return
 	}
 
-	//get Team from database
+	//Gets Team from database
 	var tm Team
 	if err := db.Where("identifier = ?", identifier).First(&tm).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":  conf[errorInternal].(string),
-			"status": http.StatusInternalServerError,
-		})
+		createInternalErrorResponse(c)
 		return
 	}
 
-	//delete from database
+	//Deletes VolunterEmail from database
 	ve = VolunteerEmail{tm.ID, email}
 	if err := db.Delete(VolunteerEmail{}, "volunteer_email=? and team_id=?", ve.VolunteerEmail, ve.TeamID).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":  conf[errorInternal].(string),
-			"status": http.StatusInternalServerError,
-		})
+		createInternalErrorResponse(c)
 		return
 	}
 	c.JSON(200, ve)

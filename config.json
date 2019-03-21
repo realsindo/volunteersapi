@@ -1,9 +1,11 @@
 {
+	"Listener":":8080",
+	"Database" : "volunteersdb",
 	"EmailConfig" : {
 		"SmtpServer" : "mail.open-spirit.net:25",
 		"Subject" : "Authorization key",
-		"Message" : "Your authorization key:",
-		"Sender" : "support@open-spirit.net"
+		"Message" : "Your authorization key: ",
+		"Sender" : "skuska@test.net"
 	},
 	"ReporterUser" : "reporter",
 	"ReporterPassword" : "supertajneheslo",

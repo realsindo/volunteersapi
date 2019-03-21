@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 	"net/smtp"
+	"os"
+	"path"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -13,27 +15,33 @@ import (
 	"github.com/micro/go-config"
 
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
-	//on windows I use postgress backend because sqllite did not work and I was in hurry
-	//_ "github.com/jinzhu/gorm/dialects/postgres"
 )
 
-//Used contants
-const dbFile = "volunteersdb"
-const confFile = "config.json"
-const authSelect = "AuthSelect"
-const realmPrefix = "RealmPrefix"
-const authorizationRequired = "AuthorizationRequired"
-const wwwAuthentificate = "WwwAuthentificate"
-const emailConfig = "EmailConfig"
-const smtpServer = "SmtpServer"
-const emailSubject = "Subject"
-const emailMessage = "Message"
-const emailSender = "Sender"
+//Used constants
+const cListener = "Listener"
+const cDatabase = "Database"
+const cAuthSelect = "AuthSelect"
+const cRealmPrefix = "RealmPrefix"
+const cAuthorizationRequired = "AuthorizationRequired"
+const cWwwAuthentificate = "WwwAuthentificate"
+const cEmailConfig = "EmailConfig"
+const cSMTPServer = "SmtpServer"
+const cEmailSubject = "Subject"
+const cEmailMessage = "Message"
+const cEmailSender = "Sender"
+const cErrorNotFound = "ErrorNotFound"
+const cErrorUnauthorized = "ErrorUnauthorized"
+const cJSONDecoding = "JsonDecoding"
+const cEntityExists = "EntityExists"
+const cErrorInternal = "InternalError"
+const cReporterUser = "ReporterUser"
+const cReporterPassword = "ReporterPassword"
+const cUsageLine1 = "Config file parameter missing"
+const cUsageLine2 = "Usage: %s config_file\n"
+const cUsageLine3 = "config_file - path to config file\n"
 
 // Global variables
 var db *gorm.DB
-var err error
-var conf map[string]interface{}
 var authMap gin.Accounts
 
 //Volunteer struct is representation of Volunteer
@@ -59,9 +67,9 @@ type VolunteerEmail struct {
 	VolunteerEmail string `json:"volunteeremail" binding:"required,email,max=255" ` //
 }
 
-//Fill authorization map with users from database
+//Fills authorization map with users from database
 func fillAuthMap() {
-	rows, err := db.Raw(conf[authSelect].(string)).Rows()
+	rows, err := db.Raw(getCfgString(cAuthSelect)).Rows()
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -76,21 +84,28 @@ func fillAuthMap() {
 
 //Main function
 func main() {
-	//Load config file and map it to the global variable
-	config.LoadFile(confFile)
-	conf = config.Map()
-	//make global variablr
+	//Checks if has argument for config
+	if len(os.Args) < 2 {
+		fmt.Println(cUsageLine1)
+		progname, _ := os.Executable()
+		fmt.Printf(cUsageLine2, path.Base(progname))
+		fmt.Println(cUsageLine3)
+		os.Exit(0)
+	}
+	//Loads config file
+	config.LoadFile(os.Args[1])
+
+	//Makes global variable
 	authMap = make(gin.Accounts)
 
-	//Connect to the database
-	db, err = gorm.Open("sqlite3", dbFile)
-	//I am using postgress on Windows because sqllite backen did not work for me and I was in hurry
-	//db, err = gorm.Open("postgres", "host=localhost port=5432 user=postgres sslmode=disable dbname=test password=heslo")
+	//Connects to the database
+	var err error
+	db, err = gorm.Open("sqlite3", getCfgString(cDatabase))
 	if err != nil {
 		fmt.Println(err)
 	}
 	defer db.Close()
-	//only for sqllite to allow foreign keys
+	//Only for sqllite to allow foreign keys
 	db.Exec("PRAGMA foreign_keys = ON")
 
 	//Setup database
@@ -100,27 +115,26 @@ func main() {
 	db.Debug().Model(&VolunteerEmail{}).AddForeignKey("team_id", "teams(id)", "CASCADE", "CASCADE")
 	db.Debug().Model(&VolunteerEmail{}).AddForeignKey("volunteer_email", "volunteers(email)", "CASCADE", "CASCADE")
 
-	//fill authorization map from database
+	//Fills authorization map from database
 	fillAuthMap()
 
-	// add reporter user
-	authMap[conf[reporterUser].(string)] = conf[reporterPassword].(string)
+	//Adds reporter user
+	authMap[getCfgString(cReporterUser)] = getCfgString(cReporterPassword)
 
-	//setup routing for volunteer
+	//Setup routing for volunteer
 	r := gin.Default()
 	v1 := r.Group("/v1")
 	a1 := r.Group("/v1")
-	//add basic authentification
+	//Adds basic authentification
 	a1.Use(authRequired())
 
-	//routing will be loaded from config file.
 	a1.GET("/volunteers/", getVolunteers)
 	a1.GET("/volunteers/:email", getVolunteer)
 	v1.POST("/volunteers", createVolunteer)
 	a1.PUT("/volunteers/:email", updateVolunteer)
 	a1.DELETE("/volunteers/:email", deleteVolunteer)
 
-	//setup routing for teams
+	//Setup routing for teams
 	a1.POST("/teams", createTeam)
 	a1.GET("/teams/", getTeams)
 	a1.GET("/teams/:identifier", getTeam)
@@ -128,18 +142,16 @@ func main() {
 	a1.PUT("/teams/:identifier/deassign", deassignVolunteerFromTeam)
 	a1.DELETE("/teams/:identifier", deleteTeam)
 
-	r.Run(":8080")
+	r.Run(getCfgString(cListener))
 }
 
-//check basic authentification if needed
+//Check basic authentification if needed
 func authRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		username, password, _ := c.Request.BasicAuth()
 		if authMap[username] == "" || authMap[username] != password {
-			//realm := "Basic realm=" + strconv.Quote("Authorization Required")
-			realm := conf[realmPrefix].(string) + strconv.Quote(conf[authorizationRequired].(string))
-			//c.Header("WWW-Authenticate", realm)
-			c.Header(conf[wwwAuthentificate].(string), realm)
+			realm := getCfgString(cRealmPrefix) + strconv.Quote(getCfgString(cAuthorizationRequired))
+			c.Header(getCfgString(cWwwAuthentificate), realm)
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
@@ -147,25 +159,97 @@ func authRequired() gin.HandlerFunc {
 	}
 }
 
-//send email with password
+//Authentificates user if data belong to the user
+func volunteerAuth(c *gin.Context, vol *Volunteer) bool {
+	email, _, _ := c.Request.BasicAuth()
+	if email != vol.Email {
+		return false
+	}
+	return true
+}
+
+//This is preparation for reporter user which will be able to get all data
+func reporterAuth(c *gin.Context) bool {
+	repuser, passwd, _ := c.Request.BasicAuth()
+
+	if repuser != getCfgString(cReporterUser) || passwd != getCfgString(cReporterPassword) {
+		createUnauthorizedResponse(c)
+		return false
+	}
+	return true
+}
+
+//Gets string value from config
+func getCfgString(name ...string) string {
+	return getCfgStringDefault("", name...)
+}
+
+//Gets string value from config with default value
+func getCfgStringDefault(def string, name ...string) string {
+	return config.Get(name...).String(def)
+}
+
+//Sends email with password
 func (vol *Volunteer) sendEmailWithPassword() {
-	emailcfg := conf[emailConfig].(map[string]interface{})
-	c, err := smtp.Dial(emailcfg[smtpServer].(string))
+	c, err := smtp.Dial(getCfgString(cEmailConfig, cSMTPServer))
 	if err != nil {
-		log.Fatal(err)
+		log.Panicln(err)
 	}
 	defer c.Close()
 
-	c.Mail(emailcfg[emailSender].(string))
+	from := getCfgString(cEmailConfig, cEmailSender)
+	c.Mail(from)
 	c.Rcpt(vol.Email)
 
 	wc, err := c.Data()
 	if err != nil {
-		log.Fatal(err)
+		log.Panicln(err)
 	}
 	defer wc.Close()
-	buf := bytes.NewBufferString(emailcfg[emailSubject].(string) + vol.Password)
+	buf := bytes.NewBufferString("From: " + from + "\r\n" + "To: " + vol.Email + "\r\n" +
+		"Subject: " + getCfgString(cEmailConfig, cEmailSubject) + "\r\n" + "\r\n" +
+		getCfgString(cEmailConfig, cEmailMessage) + vol.Password)
 	if _, err = buf.WriteTo(wc); err != nil {
-		log.Fatal(err)
+		log.Panicln(err)
 	}
+}
+
+//Creates Unauthorized response
+func createUnauthorizedResponse(c *gin.Context) {
+	c.JSON(http.StatusUnauthorized, gin.H{
+		"error":  getCfgString(cErrorUnauthorized),
+		"status": http.StatusUnauthorized,
+	})
+}
+
+//Creates NotFound response
+func createNotFoundResponse(c *gin.Context) {
+	c.JSON(http.StatusNotFound, gin.H{
+		"error":  getCfgString(cErrorNotFound),
+		"status": http.StatusNotFound,
+	})
+}
+
+//Creates BadRequest response
+func createBadRequestResponse(c *gin.Context, err error) {
+	c.JSON(http.StatusBadRequest, gin.H{
+		"error":  getCfgString(cJSONDecoding) + err.Error(),
+		"status": http.StatusBadRequest,
+	})
+}
+
+//Creates StatusConflict response
+func createStatusConflictResponse(c *gin.Context) {
+	c.JSON(http.StatusConflict, gin.H{
+		"error":  getCfgString(cEntityExists),
+		"status": http.StatusConflict,
+	})
+}
+
+//Creates InternalServerError response
+func createInternalErrorResponse(c *gin.Context) {
+	c.JSON(http.StatusInternalServerError, gin.H{
+		"error":  getCfgString(cErrorInternal),
+		"status": http.StatusInternalServerError,
+	})
 }
